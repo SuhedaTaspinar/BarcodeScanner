@@ -1,49 +1,94 @@
-import {useEffect, useRef} from "react";
+import './App.css';
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import Webcam from "react-webcam";
+import { BrowserMultiFormatReader } from '@zxing/library';
 
 function App() {
+    const [isCameraOpen, setIsCameraOpen] = useState(false);
+    const [barcodeScans, setBarcodeScans] = useState([]);
+    const [error, setError] = useState(null);
+    const webcamRef = useRef(null);
 
-  const video = useRef(null)
-  const canvas = useRef(null)
+    const codeReader = useMemo(() => new BrowserMultiFormatReader(), []);
 
-  const openCam = () => {
-      navigator.mediaDevices.getUserMedia({video: {width: 1280, height: 720}})
-          .then(stream => {
-              video.current.srcObject = stream;
-              video.current.play()
+    const startScanning = useCallback(() => {
+        if (webcamRef.current) {
+            const imageSrc = webcamRef.current.getScreenshot();
+            if (imageSrc) {
+                fetch(imageSrc)
+                    .then(res => res.blob())
+                    .then(blob => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => {
+                            const imageDataUrl = e.target.result;
+                            codeReader.decodeFromImageUrl(imageDataUrl)
+                                .then(result => {
+                                    setBarcodeScans((prevScans) => [...prevScans, result.text]);
+                                    setError(null);
+                                })
+                                .catch(err => {
+                                    console.error('Barcode scan error:', err);
+                                    setError("Barcode scan error: " + err.message);
+                                });
+                        };
+                        reader.readAsDataURL(blob);
+                    })
+                    .catch(error => {
+                        console.error('Error fetching image:', error);
+                        setError("Error fetching image: " + error.message);
+                    });
+            }
+        }
+    }, [codeReader]);
 
-              const ctx = canvas.current.getContext("2d")
+    useEffect(() => {
+        if (isCameraOpen) {
+            const interval = setInterval(() => {
+                startScanning();
+            }, 1000);
 
-              if (!('BarcodeDetector' in window)) {
-                  console.error('Tarayıcınız Barcode Detector API\'sini desteklemiyor.');
-              }
-              else {
-                  const barcode = new window.BarcodeDetector({formats: ["qr_code", "ean_13"]});
-              }
+            return () => clearInterval(interval);
+        }
+    }, [isCameraOpen, startScanning]);
 
-              setInterval(() => {
-                  canvas.current.width = video.current.videoWidth
-                  canvas.current.height = video.current.videoHeight
-                  ctx.drawImage(video.current, 0, 0, video.current.videoWidth, video.current.videoHeight);
-                  barcode.detect(canvas.current)
-                      .then(([data])=>{console.log(data)})
-                      .catch((err)=>{console.log(err)})
-              }, 100)
+    const handleOpenCamera = () => {
+        setIsCameraOpen(true);
+    };
 
+    const handleCloseCamera = () => {
+        setIsCameraOpen(false);
+    };
 
-          })
-          .catch(err => console.log(err))
-  }
-
-
-  return (
-    <>
-        <button onClick={openCam}>kamerayı aç</button>
-        <div>
-            <video ref={video} autoPlay muted hidden/>
-            <canvas ref={canvas}/>
+    return (
+        <div className="App" style={{ padding: "5rem 10rem" }}>
+            {!isCameraOpen ? (
+                <button onClick={handleOpenCamera}>Open Camera</button>
+            ) : (
+                <div>
+                    <button onClick={handleCloseCamera}>Close Camera</button>
+                    <Webcam
+                        audio={false}
+                        height={500}
+                        width={500}
+                        screenshotFormat="image/jpeg"
+                        ref={webcamRef}
+                        videoConstraints={{
+                            facingMode: "environment",
+                        }}
+                    />
+                </div>
+            )}
+            <div>
+                <h3>Scanned Barcodes:</h3>
+                <ul>
+                    {barcodeScans.map((barcode, index) => (
+                        <li key={index}>{barcode}</li>
+                    ))}
+                </ul>
+            </div>
+            {error && <p style={{ color: 'red' }}>{error}</p>}
         </div>
-    </>
-  )
+    );
 }
 
-export default App
+export default App;
